@@ -1,10 +1,9 @@
 ---
-title: Demo for InstructLab CLI
 author: Kai Xu
 date: April 16th, 2024 | v0.13.0
 ---
 
-## Welcome to Demo for InstructLab CLI
+# Welcome to Demo for InstructLab CLI
 
 A tool to help you contribute to InstructLab Taxonomy.
 <!-- pause -->
@@ -34,14 +33,14 @@ source venv/bin/activate.fish
 Install CLI
 
 ```fish
-pip install instructlab
+pip install instructlab[cpu]
 ```
 
 <!-- pause -->
 Initialize workspace
 
 ```fish
-ilab init
+ilab config init
 ```
 
 ---
@@ -51,14 +50,14 @@ ilab init
 Download current model
 
 ```fish
-ilab download
+ilab model download
 ```
 
 <!-- pause -->
 Start chat
 
 ```fish
-ilab chat
+ilab model chat
 ```
 
 <!-- pause -->
@@ -74,7 +73,7 @@ Trying...
 Check current status of taxonomy
 
 ```fish
-ilab diff
+ilab taxonomy diff
 ```
 
 <!-- pause -->
@@ -90,7 +89,7 @@ Add file to taxonomy and check updated status of taxonomy
 ```fish
 mkdir -p taxonomy/knowledge/instructlab/cli
 cp ../qna.yaml taxonomy/knowledge/instructlab/cli/qna.yaml
-ilab diff
+ilab taxonomy diff
 ```
 
 ---
@@ -100,7 +99,7 @@ ilab diff
 Generate 25 synthetic samples
 
 ```fish
-ilab generate --num-instructions 25
+ilab data generate --num-instructions 25
 ```
 
 - Here we use 25 for demo purpose only.
@@ -122,7 +121,7 @@ ls generated
 Perform Q-LoRA for 100 iterations
 
 ```fish
-ilab train --iters 100
+ilab model train --iters 100
 ```
 
 - Here we use 100 for this particular demo.
@@ -144,7 +143,7 @@ ls instructlab-merlinite-7b-lab-mlx-q
 Run old/new model on test data
 
 ```fish
-ilab test
+ilab model test
 ```
 
 ---
@@ -154,15 +153,15 @@ ilab test
 Convert updated model to GGUF
 
 ```fish
-ilab convert --model-dir instructlab-merlinite-7b-lab-mlx-q
+ilab model convert --model-dir instructlab-merlinite-7b-lab-mlx-q
 ```
 
 <!-- pause -->
 Serve updated model and chat
 
 ```fish
-ilab serve --model-path instructlab-merlinite-7b-lab-mlx-q-fused-pt/*-Q4_K_M.gguf &
-ilab chat
+ilab model serve --model-path instructlab-merlinite-7b-lab-mlx-q-fused-pt/*-Q4_K_M.gguf &
+ilab model chat
 ```
 
 <!-- pause -->

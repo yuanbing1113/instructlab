@@ -13,18 +13,37 @@ pull_request_rules:
     - label!=needs-rebase
     - check-success=DCO
 
-    # If files are changed in .github/, the actionlint check must pass
+    # If workflow configuration files in .github/ are changed, the actionlint check must pass
     - or:
       - and:
         # regex should match the one in .github/workflows/actionlint.yml
-        - files~=.github/.*$
+        - files~=\.github/(actions|workflows)/(.*\.ya?ml|actionlint\..*)
         - check-success=actionlint
-      - -files~=.github/.*$
+      - -files~=\.github/(actions|workflows)/(.*\.ya?ml|actionlint\..*)
+
+    # e2e workflow
+    - or:
+      - and:
+        - check-success=e2e
+        - or:
+          - files~='.*\.py$'
+          - files~=pyproject.toml$
+          - files~=requirements.*\.txt$
+          - files~=.github/workflows/e2e.yml$
+          - files~='scripts/basic-workflow-tests.sh'
+          - files~='scripts/test-data/.*'
+      - and:
+        - -files~='.*\.py$'
+        - -files~=pyproject.toml$
+        - -files~=requirements.*\.txt$
+        - -files~=.github/workflows/e2e.yml$
+        - -files~='scripts/basic-workflow-tests.sh'
+        - -files~='scripts/test-data/.*'
 
     # lint and test must pass if files change that would trigger this job
     - or:
       - and:
-        - check-success=lint
+        - check-success=lint-workflow-complete
         - check-success=test-workflow-complete
         - or:
           # see .github/workflows/lint.yml and test.yml
@@ -32,13 +51,13 @@ pull_request_rules:
           - files~=pyproject.toml$
           - files~=requirements.*\.txt$
           - files~=tox.ini$
-          - files~=scripts/.*\.sh$
+          - files~=scripts/[^/]+\.sh$
       - and:
         - -files~=.*\.py$
         - -files~=pyproject.toml$
         - -files~=requirements.*\.txt$
         - -files~=tox.ini$
-        - -files~=scripts/.*\.sh$
+        - -files~=scripts/[^/]+\.sh$
 
     - or:
       - and:
@@ -201,17 +220,3 @@ pull_request_rules:
     label:
       remove:
         - one-approval
-
-- name: Trigger e2e workflow based on the 'e2e-trigger' label
-  conditions:
-    - label=e2e-trigger
-  actions:
-    github_actions:
-      workflow:
-        dispatch:
-          - workflow: e2e.yml
-            inputs:
-              pr_or_branch: "{{ number }}"
-    label:
-      remove:
-        - e2e-trigger

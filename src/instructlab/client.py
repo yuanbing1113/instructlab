@@ -2,14 +2,13 @@
 # pylint: disable=duplicate-code
 
 # Standard
-from typing import Optional
 
 # Third Party
 from openai import OpenAI, OpenAIError
 import httpx
 
 # Local
-from .config import DEFAULT_API_KEY, DEFAULT_CONNECTION_TIMEOUT
+from .configuration import DEFAULTS
 
 
 class ClientException(Exception):
@@ -18,23 +17,25 @@ class ClientException(Exception):
 
 def list_models(
     api_base,
-    tls_insecure,
-    api_key=DEFAULT_API_KEY,
-    tls_client_cert: Optional[str] = None,
-    tls_client_key: Optional[str] = None,
-    tls_client_passwd: Optional[str] = None,
+    api_key=DEFAULTS.API_KEY,
+    http_client=None,
 ):
     """List models from OpenAI-compatible server"""
     try:
-        orig_cert = (tls_client_cert, tls_client_key, tls_client_passwd)
-        cert = tuple(item for item in orig_cert if item)
-        verify = not tls_insecure
         client = OpenAI(
             base_url=api_base,
             api_key=api_key,
-            timeout=DEFAULT_CONNECTION_TIMEOUT,
-            http_client=httpx.Client(cert=cert, verify=verify),
+            timeout=DEFAULTS.CONNECTION_TIMEOUT,
+            http_client=http_client,
         )
         return client.models.list()
     except OpenAIError as exc:
         raise ClientException(f"Connection Error {exc}") from exc
+
+
+def check_api_base(api_base: str, http_client: httpx.Client | None = None) -> bool:
+    try:
+        list_models(api_base=api_base, http_client=http_client)
+        return True
+    except ClientException:
+        return False

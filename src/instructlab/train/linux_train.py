@@ -1,14 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Standard
+from pathlib import Path
 from typing import Optional
 import logging
 import os
 
 # Third Party
+# https://huggingface.co/docs/datasets/en/package_reference/loading_methods#datasets.load_dataset
 from datasets import load_dataset
 from peft import LoraConfig
 from tqdm import tqdm
+
+# https://huggingface.co/docs/transformers/model_doc/auto#transformers.AutoConfig
+# https://huggingface.co/docs/transformers/model_doc/auto#transformers.AutoModelForCausalLM
+# https://huggingface.co/docs/transformers/main_classes/quantization#transformers.BitsAndBytesConfig
+# https://huggingface.co/docs/transformers/internal/generation_utils#transformers.StoppingCriteria
+# https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -18,12 +26,15 @@ from transformers import (
     StoppingCriteriaList,
     TrainingArguments,
 )
+
+# Transformer Reinforcement Learning
+# https://huggingface.co/docs/trl/index
 from trl import DataCollatorForCompletionOnlyLM, SFTTrainer
 import click
 import torch
 
 # Local
-from ..chat.chat import CONTEXTS
+from ..model.chat import CONTEXTS
 
 # TODO CPU: Look into using these extensions
 # import intel_extension_for_pytorch as ipex
@@ -34,7 +45,7 @@ try:
     # pylint: disable=import-error
     # Third Party
     from habana_frameworks.torch import core as htcore
-    from habana_frameworks.torch import hpu as hpu
+    from habana_frameworks.torch import hpu
 
     # Habana implementations of SFT Trainer
     # https://huggingface.co/docs/optimum/habana/index
@@ -53,6 +64,7 @@ except ImportError:
 
 
 class StoppingCriteriaSub(StoppingCriteria):
+    # pylint: disable=unused-argument
     def __init__(self, stops=(), encounters=1, *, device: torch.device):
         super().__init__()
         self.device = device
@@ -144,19 +156,49 @@ def report_hpu_device(args_device: torch.device) -> None:
 
 def linux_train(
     ctx: click.Context,
-    train_file: str,
-    test_file: str,
+    train_file: Path,
+    test_file: Path,
     model_name: str,
     num_epochs: Optional[int] = None,
-    device: torch.device = torch.device("cpu"),
+    train_device: str = "cpu",
     four_bit_quant: bool = False,
-):
+    output_dir: Path = Path("training_results"),
+) -> Path:
     """Lab Train for Linux!"""
+
+    try:
+        device = torch.device(train_device)
+    except RuntimeError as e:
+        ctx.fail(str(e))
+
+    # Detect CUDA/ROCm device
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            ctx.fail(
+                f"{device.type}: Torch has no CUDA/ROCm support or could not detect "
+                "a compatible device."
+            )
+        # map unqualified 'cuda' to current device
+        if device.index is None:
+            device = torch.device(device.type, torch.cuda.current_device())
+
+    if device.type == "hpu":
+        click.secho(
+            "WARNING: HPU support is experimental, unstable, and not "
+            "optimized, yet.",
+            fg="red",
+            bold=True,
+        )
+
+    if four_bit_quant and device.type != "cuda":
+        ctx.fail("'--4-bit-quant' option requires '--device=cuda'")
+
     print("LINUX_TRAIN.PY: NUM EPOCHS IS: ", num_epochs)
     print("LINUX_TRAIN.PY: TRAIN FILE IS: ", train_file)
     print("LINUX_TRAIN.PY: TEST FILE IS: ", test_file)
 
     print(f"LINUX_TRAIN.PY: Using device '{device}'")
+    output_dir = Path(output_dir)
     if device.type == "cuda":
         # estimated by watching nvtop / radeontop during training
         min_vram = 11 if four_bit_quant else 17
@@ -175,11 +217,14 @@ def linux_train(
 
     print("LINUX_TRAIN.PY: LOADING DATASETS")
     # Get the file name
-    train_dataset = load_dataset("json", data_files=train_file, split="train")
+    train_dataset = load_dataset(
+        "json", data_files=os.fspath(train_file), split="train"
+    )
 
-    test_dataset = load_dataset("json", data_files=test_file, split="train")
+    test_dataset = load_dataset("json", data_files=os.fspath(test_file), split="train")
     train_dataset.to_pandas().head()
 
+    # https://huggingface.co/docs/transformers/en/model_doc/auto#transformers.AutoTokenizer.from_pretrained
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -212,6 +257,7 @@ def linux_train(
         model_name, torchscript=True, trust_remote_code=True
     )
 
+    # https://huggingface.co/docs/transformers/en/model_doc/auto#transformers.AutoModelForCausalLM.from_pretrained
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype="auto",
@@ -264,11 +310,11 @@ def linux_train(
 
     print("LINUX_TRAIN.PY: GETTING THE ATTENTION LAYERS")
     # Print information about the attention modules
-    for i, layer in enumerate(attention_layers):
+    for layer in attention_layers:
         for par in list(layer.named_parameters()):
             mod = par[0]
             if isinstance(mod, str):
-                mod.split(".")[0]
+                mod = mod.split(".")[0]
         break
 
     print("LINUX_TRAIN.PY: CONFIGURING LoRA")
@@ -289,7 +335,6 @@ def linux_train(
     )
 
     tokenizer.padding_side = "right"
-    output_dir = "./training_results"
     per_device_train_batch_size = 1
     max_seq_length = 300
 
@@ -356,6 +401,7 @@ def linux_train(
             # per_device_eval_batch_size=1,
         )
 
+        # https://huggingface.co/docs/trl/main/en/sft_trainer#trl.SFTTrainer
         trainer = SFTTrainer(
             model=model,
             train_dataset=train_dataset,
@@ -376,7 +422,9 @@ def linux_train(
 
     print("LINUX_TRAIN.PY: RUNNING INFERENCE ON THE OUTPUT MODEL")
 
-    for i, (d, assistant_old) in enumerate(zip(test_dataset, assistant_old_lst)):
+    for i, (d, assistant_old) in enumerate(
+        zip(test_dataset, assistant_old_lst, strict=False)
+    ):
         output = model_generate(d["user"], **generate_kwargs)
         assistant_new = output.split(response_template.strip())[-1].strip()
         assistant_expected = d["assistant"]
@@ -393,6 +441,7 @@ def linux_train(
 
     print("LINUX_TRAIN.PY: MERGING ADAPTERS")
     model = trainer.model.merge_and_unload()
-    model.save_pretrained("./training_results/merged_model")
+    model.save_pretrained(output_dir / "merged_model")
 
     print("LINUX_TRAIN.PY: FINISHED")
+    return output_dir

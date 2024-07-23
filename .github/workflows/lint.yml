@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-name: Lint and Format
+name: Lint, Format, and MyPy
 
 on:
   push:
@@ -12,8 +12,8 @@ on:
       - 'pyproject.toml'
       - 'requirements*.txt'
       - 'tox.ini'
-      - 'scripts/*.sh'
-      - '.github/**'
+      - 'scripts/*.sh' # Used by this workflow
+      - '.github/workflows/lint.yml' # This workflow
   pull_request:
     branches:
       - "main"
@@ -23,25 +23,56 @@ on:
       - 'pyproject.toml'
       - 'requirements*.txt'
       - 'tox.ini'
-      - 'scripts/*.sh'
-      - '.github/**'
+      - 'scripts/*.sh' # Used by this workflow
+      - '.github/workflows/lint.yml' # This workflow
 
 env:
-  PYTHON_VERSION: 3.11
+  LC_ALL: en_US.UTF-8
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    name: "${{ matrix.lint.name }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        lint:
+          - name: "ruff"
+            commands: |
+              tox -e ruff
+          - name: "pylint"
+            commands: |
+              echo "::add-matcher::.github/workflows/matchers/pylint.json"
+              tox -e fastlint
+              tox -e lint
+          - name: "mypy"
+            commands: |
+              echo "::add-matcher::.github/workflows/matchers/mypy.json"
+              tox -e mypy
+          - name: "tomllint"
+            commands: |
+              tox -e tomllint
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: "Harden Runner"
+        uses: step-security/harden-runner@0d381219ddf674d61a7572ddd19d7941e271515c # v2.9.0
+        with:
+          egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
+
+      - name: "Checkout"
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           # https://github.com/actions/checkout/issues/249
           fetch-depth: 0
-          submodules: true
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f # v5.1.1
         with:
           python-version: 3.11
           cache: pip
@@ -51,24 +82,29 @@ jobs:
 
       - name: Remove llama-cpp-python from cache
         run: |
-          pip cache remove llama_cpp_python
+          python -m pip cache remove llama_cpp_python
 
-      - name: Install dependencies
+      - name: "Install tox"
         run: |
           python -m pip install --upgrade pip
-          python -m pip install tox
+          python -m pip install tox tox-gh
 
-      - name: Run Ruff check
+      - name: "${{ matrix.lint.name }}"
         run: |
-          tox -e ruff -- check
-
-      - name: Run linting
-        if: success() || failure()
-        run: |
-          echo "::add-matcher::.github/workflows/matchers/pylint.json"
-          tox -e lint
+          ${{ matrix.lint.commands }}
+        env:
+          RUFF_OUTPUT_FORMAT: github
 
       - name: Remove llama-cpp-python from cache
         if: always()
         run: |
-          pip cache remove llama_cpp_python
+          python -m pip cache remove llama_cpp_python
+
+  lint-workflow-complete:
+    needs:
+      - "lint"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint Workflow Complete
+        run: |
+          echo "Lint Workflow Complete"
